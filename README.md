@@ -53,7 +53,7 @@ It also creates `~/.vault-pass-dev`, `-staging`, `-prod`.
   | `ansible-vault-prod` | Secret file | `~/.vault-pass-prod` |
 - Create a **Multibranch Pipeline** job pointing at this repo.
 
-**5. Branches:** `develop` → dev, `main` → staging, then approve in Jenkins → prod.
+**5. Branches:** `dev` → dev, `main` → staging, then approve in Jenkins → prod.
 
 ## Manual deploy / rollback
 ```bash

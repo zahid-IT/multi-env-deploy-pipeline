@@ -1,5 +1,5 @@
 // Branch strategy:
-//   develop -> build once -> deploy to DEV
+//   dev -> build once -> deploy to DEV
 //   main    -> build once -> deploy to STAGING -> manual approval -> deploy the SAME image to PRODUCTION
 //
 // Run this on a Jenkins node that has docker + ansible installed and SSH access to the
@@ -56,7 +56,7 @@ pipeline {
         }
 
         stage('Build & Push image') {
-            when { anyOf { branch 'develop'; branch 'main' } }
+            when { anyOf { branch 'dev'; branch 'main' } }
             steps {
                 withCredentials([usernamePassword(credentialsId: 'registry-creds',
                                                   usernameVariable: 'REGISTRY_USER',
@@ -71,7 +71,7 @@ pipeline {
         }
 
         stage('Deploy to DEV') {
-            when { branch 'develop' }
+            when { branch 'dev' }
             steps { script { deployTo('dev') } }
         }
 
