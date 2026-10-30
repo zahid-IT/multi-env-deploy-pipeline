@@ -1,0 +1,8 @@
+---
+app_env: dev
+app_port: 80
+image_repo: zahidbilal/mysite   # CHANGE ME
+db_name: myapp_dev
+db_user: myapp_dev_user
+backup_before_deploy: false
+# Secret (in vault.yml, encrypted): vault_db_password

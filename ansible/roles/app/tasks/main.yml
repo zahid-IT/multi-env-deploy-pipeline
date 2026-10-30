@@ -1,0 +1,132 @@
+---
+- name: Require an image tag
+  ansible.builtin.assert:
+    that: image_tag is defined and image_tag | length > 0
+    fail_msg: "Pass the image to deploy: -e image_tag=<tag>"
+
+- name: Create app and backup directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0750"
+  loop:
+    - "{{ app_dir }}"
+    - "{{ app_dir }}/backups"
+
+- name: Write secrets file (.env)
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ app_dir }}/.env"
+    mode: "0600"
+  no_log: true
+
+- name: Log in to the image registry
+  ansible.builtin.command: >-
+    docker login {{ registry_host }}
+    -u {{ lookup('env', 'REGISTRY_USER') }} --password-stdin
+  args:
+    stdin: "{{ lookup('env', 'REGISTRY_PASS') }}"
+  no_log: true
+  changed_when: false
+  when: lookup('env', 'REGISTRY_USER') | length > 0
+
+- name: Find the currently deployed tag (for rollback)
+  ansible.builtin.slurp:
+    src: "{{ app_dir }}/.current_tag"
+  register: previous_tag_file
+  failed_when: false
+
+- name: Remember previous tag
+  ansible.builtin.set_fact:
+    previous_tag: "{{ (previous_tag_file.content | b64decode | trim) if previous_tag_file.content is defined else '' }}"
+
+- name: Write compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ app_dir }}/docker-compose.yml"
+    mode: "0640"
+  vars:
+    compose_image_tag: "{{ image_tag }}"
+
+- name: Start the database (if not running) and wait until it is healthy
+  ansible.builtin.command: docker compose up -d --wait db
+  args:
+    chdir: "{{ app_dir }}"
+  changed_when: false
+
+- name: Back up the database before changing anything
+  when: backup_before_deploy | bool and previous_tag | length > 0
+  ansible.builtin.shell: |
+    set -o pipefail
+    docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' \
+      > backups/{{ app_env }}-before-{{ image_tag }}-{{ ansible_date_time.iso8601_basic_short }}.dump
+    ls -1t backups/*.dump | tail -n +{{ backups_to_keep + 1 }} | xargs -r rm --
+  args:
+    chdir: "{{ app_dir }}"
+    executable: /bin/bash
+  changed_when: true
+
+- name: Deploy new version (rolls back to the previous image if anything fails)
+  block:
+    - name: Pull the new image
+      ansible.builtin.command: docker compose pull app
+      args:
+        chdir: "{{ app_dir }}"
+      changed_when: true
+
+    - name: Run database migrations (old app keeps running if this fails)
+      ansible.builtin.command: docker compose run --rm --no-deps app node migrate.js
+      args:
+        chdir: "{{ app_dir }}"
+      register: migrate
+      changed_when: "'applying' in migrate.stdout"
+
+    - name: Start the new app container
+      ansible.builtin.command: docker compose up -d --wait --remove-orphans app
+      args:
+        chdir: "{{ app_dir }}"
+      changed_when: true
+
+    - name: Health check
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ app_port }}/health"
+        return_content: true
+      register: health
+      retries: "{{ health_retries }}"
+      delay: "{{ health_delay }}"
+      until: health.status == 200
+
+    - name: Record deployed tag
+      ansible.builtin.copy:
+        content: "{{ image_tag }}\n"
+        dest: "{{ app_dir }}/.current_tag"
+        mode: "0640"
+
+  rescue:
+    - name: Roll back to the previous image
+      when: previous_tag | length > 0
+      block:
+        - name: Rewrite compose file with the previous tag
+          ansible.builtin.template:
+            src: docker-compose.yml.j2
+            dest: "{{ app_dir }}/docker-compose.yml"
+            mode: "0640"
+          vars:
+            compose_image_tag: "{{ previous_tag }}"
+
+        - name: Start previous version
+          ansible.builtin.command: docker compose up -d --wait app
+          args:
+            chdir: "{{ app_dir }}"
+          changed_when: true
+
+    - name: Fail the deployment (so Jenkins shows it as failed)
+      ansible.builtin.fail:
+        msg: >-
+          Deploy of {{ image_tag }} to {{ app_env }} failed.
+          {{ 'Rolled back to ' ~ previous_tag if previous_tag | length > 0 else 'No previous version to roll back to.' }}
+          Note: database migrations are NOT rolled back - keep them backward compatible.
+
+- name: Remove unused images
+  ansible.builtin.command: docker image prune -af --filter "until=168h"
+  changed_when: false

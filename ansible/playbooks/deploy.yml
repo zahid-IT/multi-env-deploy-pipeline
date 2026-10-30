@@ -1,0 +1,9 @@
+---
+# Usage (Jenkins does this for you):
+#   ansible-playbook -i inventories/dev/hosts.yml playbooks/deploy.yml -e image_tag=1a2b3c4d
+- name: Deploy website and its Postgres database
+  hosts: app_servers
+  become: true
+  roles:
+    - docker
+    - app

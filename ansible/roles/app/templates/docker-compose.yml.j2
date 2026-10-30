@@ -1,0 +1,35 @@
+# Managed by Ansible - do not edit by hand. Secrets live in .env (mode 0600).
+name: {{ app_name }}-{{ app_env }}
+
+services:
+  db:
+    image: {{ postgres_image }}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # No published ports: only the app container can reach the database.
+
+  app:
+    image: {{ image_repo }}:{{ compose_image_tag }}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+      APP_ENV: {{ app_env }}
+      APP_VERSION: {{ compose_image_tag }}
+    ports:
+      - "{{ app_port }}:3000"
+
+volumes:
+  pgdata:

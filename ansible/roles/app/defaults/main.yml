@@ -1,0 +1,11 @@
+---
+app_name: mysite
+app_dir: "/opt/{{ app_name }}"
+app_port: 80                      # host port the website is published on
+registry_host: docker.io
+image_repo: yourdockerhubuser/mysite   # CHANGE ME (or set in inventories/*/group_vars/all/vars.yml)
+postgres_image: postgres:16-alpine
+backup_before_deploy: false       # true in prod
+backups_to_keep: 10
+health_retries: 20
+health_delay: 3

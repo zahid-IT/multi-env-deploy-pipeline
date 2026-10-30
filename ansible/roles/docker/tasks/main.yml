@@ -1,0 +1,43 @@
+---
+# Installs Docker Engine + compose plugin on Debian/Ubuntu. Skipped quickly if already installed.
+- name: Check whether docker is already installed
+  ansible.builtin.command: docker compose version
+  register: docker_check
+  changed_when: false
+  failed_when: false
+
+- name: Install Docker from the official repository
+  when: docker_check.rc != 0
+  block:
+    - name: Install prerequisites
+      ansible.builtin.apt:
+        name: [ca-certificates, curl, gnupg]
+        state: present
+        update_cache: true
+
+    - name: Add Docker GPG key
+      ansible.builtin.get_url:
+        url: "https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg"
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+
+    - name: Add Docker apt repository
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [arch={{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}
+          signed-by=/etc/apt/keyrings/docker.asc]
+          https://download.docker.com/linux/{{ ansible_distribution | lower }}
+          {{ ansible_distribution_release }} stable
+        filename: docker
+
+    - name: Install Docker Engine and compose plugin
+      ansible.builtin.apt:
+        name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin]
+        state: present
+        update_cache: true
+
+- name: Make sure Docker is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
